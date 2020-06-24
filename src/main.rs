@@ -35,6 +35,11 @@ struct Damage {
 	dmg: i32
 }
 
+#[derive(Debug)]
+struct KillCount {
+	count: i32
+}
+
 
 fn manhattan_dist(x0: i32, x1: i32, y0: i32, y1: i32) -> i32{
 	let dx = (x0 - x1).max(x1 - x0);
@@ -47,7 +52,7 @@ fn spawn_enitites(world: &mut World, n: usize){
 
 	let mut rng = thread_rng();
 
-	for _ in 0..n{
+	for _ in 0..n {
 		let pos = Position{
 			x: rng.gen_range(-10, 10),
 			y: rng.gen_range(-10, 10),
@@ -55,9 +60,30 @@ fn spawn_enitites(world: &mut World, n: usize){
 		let s =  Speed{speed: rng.gen_range(1, 5)};
 		let hp = Health{hp: rng.gen_range(30, 50)};
 		let dmg = Damage{dmg: rng.gen_range(1, 10)};
+		let kc = KillCount{count: 0};
 
-		world.spawn((pos, s, hp, dmg));
+		world.spawn((pos, s, hp, dmg, kc));
 	}
+}
+
+fn batch_spawn_entities(world: &mut World, n: usize){
+	let mut rng = thread_rng();
+
+	let to_spawn = (0..n).map(|_|{
+
+		let pos = Position{
+			x: rng.gen_range(-10, 10),
+			y: rng.gen_range(-10, 10),
+		};
+		let s =  Speed{speed: rng.gen_range(1, 5)};
+		let hp = Health{hp: rng.gen_range(30, 50)};
+		let dmg = Damage{dmg: rng.gen_range(1, 10)};
+		let kc = KillCount{count: 0};
+
+		(pos, s, hp, dmg, kc)
+	});
+
+	world.spawn_batch(to_spawn);
 }
 
 fn move_system(world: &mut World){
@@ -78,7 +104,7 @@ fn move_system(world: &mut World){
 
 fn fire_at_closest(world: &mut World){
 	// In this system entities find the closest entity and fire at them
-	for (id0, (pos0, dmg0)) in &mut  world.query::<With<Health, (&Position, &Damage)>>(){
+	for (id0, (pos0, dmg0, kc0)) in &mut  world.query::<With<Health, (&Position, &Damage, &mut KillCount)>>(){
 
 		let mut min_dist: Option<i32> = None;
 		let mut closest_id: Option<Entity> = None;
@@ -113,9 +139,18 @@ fn fire_at_closest(world: &mut World){
 */
 		//Or like this:
 		let mut hp1 = world.get_mut::<Health>(closest_id.unwrap()).unwrap();
-		hp1.hp = hp1.hp - dmg0.dmg;
 
-		println!("{:?} health is now {:?}",closest_id ,hp1.hp);
+		// is it still alive?
+		if hp1.hp > 0 {
+			// apply damage
+			hp1.hp = hp1.hp - dmg0.dmg;
+			println!("{:?} was damaged by {:?} for {:?} HP",closest_id, id0, dmg0.dmg);
+			if hp1.hp <= 0{
+				// if this killed it, increase own killcount
+				kc0.count += 1;
+				println!("{:?} is now dead!",closest_id);
+			}
+		}
 	}
 }
 
@@ -130,18 +165,18 @@ fn remove_dead(world: &mut World) {
 
 	for i in 0..to_remove.len(){
 		world.despawn(to_remove[i]).unwrap();
-		println!("Entity {:?} has died!", to_remove[i]);
 	}
 }
 
 fn get_world_state(world: &mut World) {
-	for (id, (hp, pos, dmg)) in &mut  world.query::<
+	for (id, (hp, pos, dmg, kc)) in &mut  world.query::<
 		(&Health, 
 		&Position, 
-		&Damage)
+		&Damage,
+		&KillCount)
 		>() {
 			println!("Entity stats:");
-			println!("ID: {:?}, {:?}, {:?}, {:?}",id, hp, dmg, pos);
+			println!("ID: {:?}, {:?}, {:?}, {:?}, {:?}",id, hp, dmg, pos, kc);
 		}
 }
 
@@ -149,14 +184,8 @@ fn main() {
 
 	let mut world = World::new();
 
-// Spawn entity without health.
-	let mut rng = thread_rng();
-	world.spawn((Position{
-			x: rng.gen_range(-10, 10),
-			y: rng.gen_range(-10, 10),
-		},Speed{speed: rng.gen_range(1, 5)}));
-
-	spawn_enitites(&mut world, 20);
+	//spawn_enitites(&mut world, 20);
+	batch_spawn_entities(&mut world, 20);
 
 	'running: loop{
 
